@@ -6,14 +6,15 @@ import { renderAuth } from './views/auth.js';
 import { TodayView } from './views/today.js';
 import { PartnerView } from './views/partner.js';
 import { WeekView } from './views/week.js';
-import { SkillsView } from './views/skills.js';
+import { ProgressView } from './views/progress.js';
 import { ProfileView } from './views/profile.js';
+import { syncPush } from './push.js';
 
 const ROUTES = [
   { id: 'today', label: "Aujourd'hui", icon: 'sun', view: TodayView },
   { id: 'partner', label: 'Binôme', icon: 'users', view: PartnerView },
   { id: 'week', label: 'Bilan', icon: 'chart', view: WeekView },
-  { id: 'skills', label: 'Compétences', icon: 'star', view: SkillsView },
+  { id: 'progress', label: 'Progrès', icon: 'trophy', view: ProgressView },
   { id: 'profile', label: 'Profil', icon: 'user', view: ProfileView },
 ];
 
@@ -49,6 +50,7 @@ async function render() {
         setProfile(res);
         location.hash = '#/today';
         render();
+        syncPush();
       },
     });
     return;
@@ -85,7 +87,7 @@ async function render() {
     main.dataset.route = '';
     main.innerHTML = `
       <div class="empty">
-        <div class="empty-emoji" aria-hidden="true">😕</div>
+        <div class="empty-icon">${icon('alert')}</div>
         <p class="empty-title">Oups, quelque chose a coincé</p>
         <p class="muted">${esc(err.message)}</p>
         <button type="button" class="btn btn-primary" data-action="retry">${icon('refresh')} Réessayer</button>
@@ -119,16 +121,26 @@ async function boot() {
     state.installPrompt = e;
   });
 
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    // Clic sur une notification alors que l'appli est déjà ouverte : on va à la bonne page.
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data?.type === 'navigate' && e.data.hash) {
+        if (location.hash === e.data.hash) render();
+        else location.hash = e.data.hash;
+      }
+    });
+  }
+
   if (hasToken()) {
     try {
       await loadProfile();
+      syncPush();
     } catch {
       state.me = null; // jeton expiré ou serveur injoignable : retour à la connexion
     }
   }
   render();
-
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 boot();

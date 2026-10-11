@@ -2,23 +2,33 @@
 import { get, put } from '../api.js';
 import { state } from '../state.js';
 import { today, addDays, mondayOf, weekLabel, dayShort, dayShortNum } from '../dates.js';
-import { esc, icon, delegate, busy, toast, ring, segmented, emptyState, goalState, shareOrCopy, firstName } from '../ui.js';
+import {
+  esc, icon, delegate, busy, toast, ring, segmented, emptyState, goalState, shareOrCopy, firstName, fmtNum, STATE_LABEL,
+} from '../ui.js';
+import { progressPct } from '../components.js';
 
 function verdict(rate) {
   if (rate == null) return 'Pas encore de résultat';
-  if (rate >= 90) return 'Semaine exceptionnelle 🏆';
-  if (rate >= 70) return 'Très belle semaine 💪';
-  if (rate >= 50) return 'Bonne dynamique 👍';
+  if (rate >= 90) return 'Semaine exceptionnelle';
+  if (rate >= 70) return 'Très belle semaine';
+  if (rate >= 50) return 'Bonne dynamique';
   if (rate >= 30) return 'Semaine en demi-teinte';
-  return 'Semaine difficile, on repart 💫';
+  return 'Semaine difficile, on repart';
 }
 
 function delta(rate, prev) {
   if (rate == null || prev == null) return null;
   const d = rate - prev;
-  if (d === 0) return { cls: 'flat', text: '= stable vs semaine précédente' };
-  return { cls: d > 0 ? 'up' : 'down', text: `${d > 0 ? '▲ +' : '▼ '}${d} pts vs semaine précédente` };
+  if (d === 0) return { cls: 'flat', text: 'Stable par rapport à la semaine précédente' };
+  return { cls: d > 0 ? 'up' : 'down', text: `${d > 0 ? '+' : ''}${d} pts par rapport à la semaine précédente` };
 }
+
+const stat = (iconName, value, label) => `
+  <div class="stat">
+    <span class="stat-ico">${icon(iconName)}</span>
+    <span class="stat-val">${value}</span>
+    <span class="stat-lbl">${label}</span>
+  </div>`;
 
 export async function WeekView(ctx) {
   const who = state.partner ? state.reportWho : 'me';
@@ -30,6 +40,7 @@ export async function WeekView(ctx) {
   const color = who === 'me' ? 'var(--primary)' : 'var(--accent)';
   const s = r.summary;
   const dlt = delta(s.rate, s.prevRate);
+  const icoDelta = dlt ? (dlt.cls === 'up' ? 'trending-up' : dlt.cls === 'down' ? 'trending-down' : 'minus') : '';
 
   // --- Jour par jour --------------------------------------------------------
   const maxDay = Math.max(1, ...r.days.map((d) => d.total));
@@ -52,12 +63,28 @@ export async function WeekView(ctx) {
       <span><i class="s-missed"></i>Manqué</span><span><i class="s-upcoming"></i>À venir</span>
     </div>`;
 
+  // --- Objectifs de la semaine -----------------------------------------------
+  const weekGoals = r.goals.filter((g) => g.period === 'week');
+  const weekGoalsList = weekGoals.map((g) => {
+    const st = goalState(g, t);
+    return `
+      <div class="wk-goal">
+        <div class="row between gap">
+          <strong>${esc(g.title)}</strong>
+          <span class="badge b-${st}">${STATE_LABEL[st]}</span>
+        </div>
+        ${g.target != null ? `
+          <div class="xpbar"><span style="width:${progressPct(g)}%;--c:var(--success)"></span></div>
+          <span class="small muted">${fmtNum(g.progress)} / ${fmtNum(g.target)} ${esc(g.unit)}</span>` : ''}
+      </div>`;
+  }).join('');
+
   // --- Compétences de la semaine --------------------------------------------
   const maxXp = Math.max(1, ...r.skills.map((k) => k.xp));
   const skillsList = r.skills.length
     ? r.skills.map((k) => `
         <div class="wk-skill" style="--c:${esc(k.color)}">
-          <span class="wk-icon" aria-hidden="true">${esc(k.icon)}</span>
+          <span class="wk-icon">${icon(k.icon)}</span>
           <div class="grow">
             <div class="row between"><strong>${esc(k.name)}</strong><span class="muted small">+${k.xp} XP · ${k.done}/${k.total}</span></div>
             <div class="xpbar"><span style="width:${(k.xp / maxXp) * 100}%"></span></div>
@@ -82,7 +109,7 @@ export async function WeekView(ctx) {
   // --- Réussites / à retravailler -------------------------------------------
   const doneGoals = r.goals.filter((g) => g.status === 'done');
   const missedGoals = r.goals.filter((g) => goalState(g, t) === 'missed');
-  const goalLine = (g) => `<li><span class="muted small">${dayShort(g.day)}</span> ${esc(g.title)}</li>`;
+  const goalLine = (g) => `<li><span class="muted small">${g.period === 'week' ? 'sem.' : dayShort(g.day)}</span> ${esc(g.title)}</li>`;
 
   // --- Bilan écrit ------------------------------------------------------------
   const selfReview = r.reviews.find((x) => x.authorId === person.id);
@@ -96,7 +123,7 @@ export async function WeekView(ctx) {
         <div class="stars" role="radiogroup" aria-label="Note de la semaine">
           ${[5, 4, 3, 2, 1].map((n) => `
             <input type="radio" id="rv-${n}" name="rating" value="${n}" ${myReview?.rating === n ? 'checked' : ''}>
-            <label for="rv-${n}" title="${n}/5">★</label>`).join('')}
+            <label for="rv-${n}" title="${n}/5">${icon('star')}</label>`).join('')}
         </div>
       </div>
       <textarea name="comment" rows="4" maxlength="2000" placeholder="${who === 'me'
@@ -105,11 +132,10 @@ export async function WeekView(ctx) {
       <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
     </form>`;
   const theirTitle = who === 'me' ? `Le mot de ${esc(partnerName)}` : `Le ressenti de ${esc(partnerName)}`;
+  const starsRead = (n) => `<span class="stars-read" aria-label="${n} sur 5">${[1, 2, 3, 4, 5].map((i) => icon('star', i <= n ? 'on' : '')).join('')}</span>`;
   const theirBlock = !state.partner ? '' : theirReview && (theirReview.comment || theirReview.rating)
     ? `<div class="card review-read">
-         <div class="row between"><h3>${theirTitle}</h3>
-           ${theirReview.rating ? `<span class="stars-read" aria-label="${theirReview.rating} sur 5">${'★'.repeat(theirReview.rating)}<span>${'★'.repeat(5 - theirReview.rating)}</span></span>` : ''}
-         </div>
+         <div class="row between"><h3>${theirTitle}</h3>${theirReview.rating ? starsRead(theirReview.rating) : ''}</div>
          ${theirReview.comment ? `<p>${esc(theirReview.comment)}</p>` : ''}
        </div>`
     : `<div class="card review-read muted"><h3>${theirTitle}</h3><p class="small">Pas encore écrit pour cette semaine.</p></div>`;
@@ -134,29 +160,35 @@ export async function WeekView(ctx) {
       <button type="button" class="icon-btn" data-action="next" aria-label="Semaine suivante" ${r.week >= thisMonday ? 'disabled' : ''}>${icon('chevR')}</button>
     </div>
 
-    ${!s.total ? emptyState('🗓️', 'Aucun objectif cette semaine', who === 'me'
-      ? 'Les objectifs fixés par ton binôme apparaîtront dans ce bilan.'
+    ${!s.total ? emptyState('calendar', 'Aucun objectif cette semaine', who === 'me'
+      ? 'Les objectifs de la semaine apparaîtront dans ce bilan.'
       : `Fixe des objectifs à ${partnerName} pour suivre sa progression.`) : `
     <div class="card hero">
       ${ring(s.rate, { size: 112, stroke: 11, color })}
       <div>
         <p class="eyebrow">${who === 'me' ? 'Mon taux de réussite' : `Taux de réussite de ${esc(partnerName)}`}</p>
         <p class="hero-title">${verdict(s.rate)}</p>
-        ${dlt ? `<p class="delta ${dlt.cls}">${dlt.text}</p>` : ''}
+        ${dlt ? `<p class="delta ${dlt.cls}">${icon(icoDelta, 'sm')}${dlt.text}</p>` : ''}
       </div>
     </div>
 
     <div class="stats">
-      <div class="stat"><span class="stat-val">${s.done}<small>/${s.total}</small></span><span class="stat-lbl">✅ objectifs faits</span></div>
-      <div class="stat"><span class="stat-val">+${s.xp}</span><span class="stat-lbl">⚡ XP gagnés</span></div>
-      <div class="stat"><span class="stat-val">${r.streak}<small> j</small></span><span class="stat-lbl">🔥 série (record ${r.bestStreak} j)</span></div>
-      <div class="stat"><span class="stat-val">${s.missed}</span><span class="stat-lbl">⏳ manqués${s.upcoming ? ` · ${s.upcoming} à venir` : ''}</span></div>
+      ${stat('check-circle', `${s.done}<small>/${s.total}</small>`, 'objectifs faits')}
+      ${stat('zap', `+${s.xp}`, 'XP gagnés')}
+      ${stat('flame', `${r.streak}<small> j</small>`, `série (record ${r.bestStreak} j)`)}
+      ${stat('clock', `${s.missed}`, `manqués${s.upcoming ? ` · ${s.upcoming} à venir` : ''}`)}
     </div>
 
     <section class="section">
       <div class="section-head"><h2>Jour par jour</h2></div>
       <div class="card">${dayChart}</div>
     </section>
+
+    ${weekGoals.length ? `
+      <section class="section">
+        <div class="section-head"><h2>Objectifs de la semaine</h2></div>
+        <div class="card stack">${weekGoalsList}</div>
+      </section>` : ''}
 
     <section class="section">
       <div class="section-head"><h2>Compétences travaillées</h2></div>
@@ -166,12 +198,12 @@ export async function WeekView(ctx) {
     <section class="section">
       <div class="section-head"><h2>Réussites et points à retravailler</h2></div>
       <details class="card fold" ${doneGoals.length ? 'open' : ''}>
-        <summary>🏅 Réussites <span class="muted">(${doneGoals.length})</span></summary>
+        <summary><span class="fold-ico ok">${icon('award', 'sm')}</span>Réussites <span class="muted">(${doneGoals.length})</span></summary>
         ${doneGoals.length ? `<ul class="glist">${doneGoals.map(goalLine).join('')}</ul>` : '<p class="muted small">Rien pour l\'instant.</p>'}
       </details>
       <details class="card fold">
-        <summary>🔁 À retravailler <span class="muted">(${missedGoals.length})</span></summary>
-        ${missedGoals.length ? `<ul class="glist">${missedGoals.map(goalLine).join('')}</ul>` : '<p class="muted small">Aucun objectif manqué 👌</p>'}
+        <summary><span class="fold-ico ko">${icon('repeat', 'sm')}</span>À retravailler <span class="muted">(${missedGoals.length})</span></summary>
+        ${missedGoals.length ? `<ul class="glist">${missedGoals.map(goalLine).join('')}</ul>` : '<p class="muted small">Aucun objectif manqué.</p>'}
       </details>
     </section>`}
 
@@ -186,13 +218,13 @@ export async function WeekView(ctx) {
     </section>`;
 
   const shareText = () => {
-    const top = r.skills.filter((k) => k.xp > 0).slice(0, 3).map((k) => `${k.icon} ${k.name} +${k.xp} XP`).join(' · ');
+    const top = r.skills.filter((k) => k.xp > 0).slice(0, 3).map((k) => `${k.name} +${k.xp} XP`).join(', ');
     return [
-      `📊 Bilan Auphine — semaine du ${weekLabel(r.week)}`,
-      `👤 ${person.name} : ${s.rate ?? '–'} % de réussite${dlt ? ` (${dlt.text})` : ''}`,
-      `✅ ${s.done}/${s.total} objectifs · ⚡ +${s.xp} XP · 🔥 série de ${r.streak} j`,
-      top ? `🎯 ${top}` : '',
-      myReview?.comment ? `💬 « ${myReview.comment} »` : '',
+      `Bilan Auphine · semaine du ${weekLabel(r.week)}`,
+      `${person.name} : ${s.rate ?? '–'} % de réussite${dlt ? ` (${dlt.text.toLowerCase()})` : ''}`,
+      `${s.done}/${s.total} objectifs faits · +${s.xp} XP · série de ${r.streak} jours`,
+      top ? `Compétences : ${top}` : '',
+      myReview?.comment ? `« ${myReview.comment} »` : '',
     ].filter(Boolean).join('\n');
   };
 
@@ -215,7 +247,7 @@ export async function WeekView(ctx) {
       review: (form) => busy(form, async () => {
         const fd = new FormData(form);
         await put('/reviews', { who, week: r.week, rating: fd.get('rating') || null, comment: fd.get('comment') });
-        toast('Bilan enregistré ✔', 'success');
+        toast('Bilan enregistré', 'success');
       }),
     }),
   };

@@ -2,12 +2,14 @@
 import { today, mondayOf } from './dates.js';
 
 export const state = {
-  me: null,          // { id, name, email, inviteCode }
+  me: null,          // { id, name, email, inviteCode, notifPrefs }
   partner: null,     // { id, name } | null
   day: today(),      // jour sélectionné (vues Aujourd'hui / Binôme)
   reportWeek: mondayOf(today()),
   reportWho: 'me',   // bilan affiché : 'me' | 'partner'
-  skillsWho: 'me',
+  progressWho: 'me', // vue Progrès : 'me' | 'partner'
+  progressTab: 'skills', // 'skills' | 'badges' | 'calendar'
+  calMonth: today().slice(0, 7),
   justDone: null,    // id d'un objectif qui vient d'être coché (animation)
   installPrompt: null,
 };

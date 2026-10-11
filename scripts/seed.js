@@ -19,34 +19,39 @@ const PEOPLE = [
     name: 'Alice',
     email: 'alice@demo.local',
     skills: {
-      Sport: ['🏃', '#f0643f', ['30 min de course', '50 pompes dans la journée', '10 000 pas', 'Gainage 10 min']],
-      Lecture: ['📚', '#5b4bdb', ['Lire 20 pages', 'Finir un chapitre', 'Noter 3 idées du livre']],
-      Anglais: ['🗣️', '#1fa971', ['15 min de Duolingo', 'Un podcast en anglais', 'Écrire 5 phrases en anglais']],
-      'Bien-être': ['🧘', '#e9a23b', ['10 min de méditation', 'Boire 1,5 L d\'eau', "Pas d'écran après 22 h"]],
+      Sport: ['activity', '#f0643f', ['30 min de course', '50 pompes dans la journée', '10 000 pas', 'Gainage 10 min']],
+      Lecture: ['book', '#5b4bdb', ['Lire 20 pages', 'Finir un chapitre', 'Noter 3 idées du livre']],
+      Anglais: ['globe', '#17a067', ['15 min de Duolingo', 'Un podcast en anglais', 'Écrire 5 phrases en anglais']],
+      'Bien-être': ['leaf', '#d48a1c', ['10 min de méditation', "Boire 1,5 L d'eau", "Pas d'écran après 22 h"]],
     },
+    weekly: [['Sport', '3 séances de sport', 3, 'séances'], ['Lecture', 'Lire 100 pages', 100, 'pages']],
+    perso: ['Ranger mon bureau', 'Appeler mamie'],
   },
   {
     name: 'Bruno',
     email: 'bruno@demo.local',
     skills: {
-      Code: ['💻', '#5b4bdb', ['1 h sur le projet perso', 'Un exercice d\'algorithmie', 'Lire une doc technique']],
-      Sport: ['💪', '#f0643f', ['Séance de musculation', '20 min de vélo', 'Étirements 10 min']],
-      Sommeil: ['😴', '#7c8cff', ['Au lit avant 23 h', 'Pas de café après 16 h']],
-      Cuisine: ['🍳', '#14b8a6', ['Un repas fait maison', 'Préparer les repas du lendemain']],
+      Code: ['code', '#5b4bdb', ['1 h sur le projet perso', "Un exercice d'algorithmie", 'Lire une doc technique']],
+      Sport: ['dumbbell', '#f0643f', ['Séance de musculation', '20 min de vélo', 'Étirements 10 min']],
+      Sommeil: ['moon', '#7c8cff', ['Au lit avant 23 h', 'Pas de café après 16 h']],
+      Cuisine: ['utensils', '#14b8a6', ['Un repas fait maison', 'Préparer les repas du lendemain']],
     },
+    weekly: [['Sport', 'Faire 40 km de vélo', 40, 'km'], ['Code', 'Publier une nouvelle version', null, '']],
+    perso: ['Faire les courses', 'Réviser le permis'],
   },
 ];
 
-const NOTES = ['Plus dur que prévu mais fait !', 'Facile aujourd\'hui 😎', 'Fait en deux fois', 'Super motivé·e ce matin', ''];
-const FEEDBACKS = ['Bravo, continue comme ça !', 'Fier de toi 👏', 'Belle régularité', 'Demain on vise plus haut 💪', ''];
+const NOTES = ['Plus dur que prévu mais fait !', "Facile aujourd'hui", 'Fait en deux fois', 'Super motivé ce matin'];
+const CHEERS = ['Bravo, continue comme ça !', 'Fier de toi', 'Belle régularité', 'Demain on vise plus haut'];
+const REACTIONS = ['bravo', 'fire', 'strong', 'star', 'love'];
 const REVIEWS_SELF = [
-  'Bonne semaine dans l\'ensemble, le sport a été plus régulier.',
-  'Semaine chargée au travail, j\'ai lâché sur la fin. Objectif : mieux m\'organiser le soir.',
-  'Je sens que les habitudes s\'installent, très content·e.',
+  "Bonne semaine dans l'ensemble, le sport a été plus régulier.",
+  "Semaine chargée au travail, j'ai lâché sur la fin. Objectif : mieux m'organiser le soir.",
+  "Je sens que les habitudes s'installent, très content.",
 ];
 const REVIEWS_PARTNER = [
   'Très belle constance, tu peux augmenter un peu la difficulté.',
-  'Quelques jours ratés mais tu t\'es bien rattrapé·e, bravo.',
+  "Quelques jours ratés mais tu t'es bien rattrapé, bravo.",
   'Impressionnant cette semaine, rien à redire !',
 ];
 
@@ -70,16 +75,31 @@ async function main() {
     db.run('UPDATE users SET partner_id = ? WHERE id = ?', ids[1], ids[0]);
     db.run('UPDATE users SET partner_id = ? WHERE id = ?', ids[0], ids[1]);
 
+    const addGoal = (g) => {
+      const { lastInsertRowid: id } = db.run(
+        `INSERT INTO goals (assignee_id, author_id, skill_id, title, day, period, difficulty, status, target, unit, progress, reaction, done_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        g.assignee, g.author, g.skill ?? null, g.title, g.day, g.period || 'day', g.difficulty, g.status,
+        g.target ?? null, g.unit || '', g.progress || 0, g.reaction || '', g.status === 'todo' ? null : `${g.day}T19:00:00.000Z`,
+      );
+      goalCount++;
+      return id;
+    };
+    const addMessage = (goalId, author, body, day) =>
+      db.run('INSERT INTO messages (goal_id, author_id, body, created_at) VALUES (?, ?, ?, ?)', goalId, author, body, `${day} 19:30:00`);
+
     PEOPLE.forEach((p, i) => {
       const me = ids[i];
       const partner = ids[1 - i];
       const skills = Object.entries(p.skills).map(([name, [icon, color, titles]]) => ({
+        name,
         id: db.run(
           'INSERT INTO skills (owner_id, created_by, name, icon, color) VALUES (?, ?, ?, ?, ?)',
           me, partner, name, icon, color,
         ).lastInsertRowid,
         titles,
       }));
+      const skillId = (name) => skills.find((s) => s.name === name).id;
 
       for (let d = start, n = 0; d <= end; d = L.addDays(d, 1), n++) {
         // La réussite progresse au fil des semaines : la courbe d'évolution a quelque chose à montrer.
@@ -98,16 +118,29 @@ async function main() {
           else if (d === today) status = roll < 0.4 ? 'done' : 'todo';
           const finished = status !== 'todo';
 
-          db.run(
-            `INSERT INTO goals (assignee_id, author_id, skill_id, title, day, difficulty, status, note, feedback, reaction, done_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            me, partner, skill.id, title, d, 1 + Math.floor(rand() * 3), status,
-            finished && rand() < 0.3 ? pick(NOTES) : '',
-            finished && rand() < 0.3 ? pick(FEEDBACKS) : '',
-            finished && rand() < 0.35 ? pick(['👏', '🔥', '💪', '🌟']) : '',
-            finished ? `${d}T19:00:00.000Z` : null,
-          );
-          goalCount++;
+          const id = addGoal({
+            assignee: me, author: partner, skill: skill.id, title, day: d, difficulty: 1 + Math.floor(rand() * 3), status,
+            reaction: finished && rand() < 0.35 ? pick(REACTIONS) : '',
+          });
+          if (finished && rand() < 0.25) addMessage(id, me, pick(NOTES), d);
+          if (finished && rand() < 0.25) addMessage(id, partner, pick(CHEERS), d);
+        }
+        // Un objectif perso de temps en temps.
+        if (rand() < 0.2) {
+          addGoal({ assignee: me, author: me, title: pick(p.perso), day: d, difficulty: 1, status: d < today && rand() < 0.7 ? 'done' : 'todo' });
+        }
+      }
+
+      // Objectifs de la semaine (chiffrés ou non) sur les 5 semaines.
+      for (let w = 0; w < 5; w++) {
+        const monday = L.addDays(start, w * 7);
+        const past = L.addDays(monday, 6) < today;
+        for (const [skill, title, target, unit] of p.weekly) {
+          const ratio = past ? Math.min(1, 0.5 + rand() * 0.7) : rand() * 0.6;
+          const progress = target ? Math.round(target * ratio) : 0;
+          let status = target ? (progress >= target ? 'done' : progress > 0 ? 'partial' : 'todo') : (past && rand() < 0.7 ? 'done' : 'todo');
+          if (!target && !past) status = 'todo';
+          addGoal({ assignee: me, author: partner, skill: skillId(skill), title, day: monday, period: 'week', difficulty: 3, status, target, unit, progress });
         }
       }
 
@@ -123,8 +156,8 @@ async function main() {
   });
   db.close();
 
-  console.log(`✔ Données de démo créées (${goalCount} objectifs) dans ${DB_FILE}`);
-  console.log(`  Connexion : alice@demo.local ou bruno@demo.local — mot de passe : ${PASSWORD}`);
+  console.log(`ok Données de démo créées (${goalCount} objectifs) dans ${DB_FILE}`);
+  console.log(`   Connexion : alice@demo.local ou bruno@demo.local — mot de passe : ${PASSWORD}`);
 }
 
 main().catch((err) => {

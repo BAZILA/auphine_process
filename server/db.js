@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS skills (
   owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name       TEXT NOT NULL,
-  icon       TEXT NOT NULL DEFAULT '⭐',
+  icon       TEXT NOT NULL DEFAULT 'star',
   color      TEXT NOT NULL DEFAULT '#5b4bdb',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (owner_id, name COLLATE NOCASE)
@@ -67,11 +67,96 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 `;
 
+// Correspondance des anciens emojis vers les noms d'icônes (migration 1).
+const EMOJI_TO_ICON = {
+  '⭐': 'star', '🏃': 'activity', '💪': 'dumbbell', '📚': 'book', '🗣': 'globe', '🧘': 'leaf',
+  '💻': 'code', '🎵': 'music', '🍳': 'utensils', '💰': 'wallet', '😴': 'moon', '💧': 'droplet',
+  '✍': 'pen', '🎨': 'palette', '🧠': 'bulb', '❤': 'heart', '🌱': 'leaf', '💼': 'briefcase',
+};
+const REACTION_TO_KEY = { '👏': 'bravo', '🔥': 'fire', '💪': 'strong', '❤️': 'love', '❤': 'love', '😅': 'courage', '🌟': 'star' };
+
+// Chaque migration s'exécute une seule fois (suivi par PRAGMA user_version).
+const MIGRATIONS = [
+  // 1 : icônes, objectifs perso / hebdo / chiffrés, photos, discussion, badges, notifications
+  (db) => {
+    db.exec(`
+      ALTER TABLE goals ADD COLUMN period TEXT NOT NULL DEFAULT 'day';  -- 'day' | 'week' (day = lundi)
+      ALTER TABLE goals ADD COLUMN target REAL;                          -- objectif chiffré (facultatif)
+      ALTER TABLE goals ADD COLUMN unit TEXT NOT NULL DEFAULT '';
+      ALTER TABLE goals ADD COLUMN progress REAL NOT NULL DEFAULT 0;
+      ALTER TABLE goals ADD COLUMN photo TEXT;                           -- nom du fichier de preuve
+      ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT '';
+      ALTER TABLE users ADD COLUMN notif_prefs TEXT NOT NULL DEFAULT '{}';
+      ALTER TABLE users ADD COLUMN last_reminder TEXT NOT NULL DEFAULT '';
+      ALTER TABLE users ADD COLUMN last_weekly TEXT NOT NULL DEFAULT '';
+
+      CREATE TABLE messages (
+        id         INTEGER PRIMARY KEY,
+        goal_id    INTEGER NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        author_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        body       TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX messages_goal ON messages (goal_id, id);
+
+      CREATE TABLE push_subscriptions (
+        endpoint   TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        p256dh     TEXT NOT NULL,
+        auth       TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE user_badges (
+        user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        badge       TEXT NOT NULL,
+        unlocked_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (user_id, badge)
+      );
+
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    `);
+
+    const setIcon = db.prepare('UPDATE skills SET icon = ? WHERE id = ?');
+    for (const s of db.prepare('SELECT id, icon FROM skills').all()) {
+      setIcon.run(EMOJI_TO_ICON[s.icon.replace(/️/g, '')] || (/^[a-z-]+$/.test(s.icon) ? s.icon : 'star'), s.id);
+    }
+    const setReaction = db.prepare('UPDATE goals SET reaction = ? WHERE id = ?');
+    for (const g of db.prepare("SELECT id, reaction FROM goals WHERE reaction <> ''").all()) {
+      setReaction.run(REACTION_TO_KEY[g.reaction] || REACTION_TO_KEY[g.reaction.replace(/️/g, '')] || 'bravo', g.id);
+    }
+    // Les anciens commentaires deviennent les premiers messages de la discussion.
+    db.exec(`
+      INSERT INTO messages (goal_id, author_id, body, created_at)
+        SELECT id, assignee_id, note, COALESCE(replace(substr(done_at, 1, 19), 'T', ' '), created_at) FROM goals WHERE note <> '';
+      INSERT INTO messages (goal_id, author_id, body, created_at)
+        SELECT id, author_id, feedback, created_at FROM goals WHERE feedback <> '';
+      UPDATE goals SET note = '', feedback = '';
+    `);
+  },
+];
+
+function migrate(db) {
+  const { user_version: version } = db.prepare('PRAGMA user_version').get();
+  for (let v = version; v < MIGRATIONS.length; v++) {
+    db.exec('BEGIN');
+    try {
+      MIGRATIONS[v](db);
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+}
+
 function createStore(file) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');
   db.exec(SCHEMA);
+  migrate(db);
 
   // Les requêtes préparées sont mises en cache par texte SQL.
   const statements = new Map();

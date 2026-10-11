@@ -1,6 +1,6 @@
 // Écran de connexion / inscription.
 import { post, setToken } from '../api.js';
-import { delegate, busy, segmented, logo } from '../ui.js';
+import { delegate, busy, segmented, logo, icon } from '../ui.js';
 
 export function renderAuth(root, { onAuthed }) {
   let mode = 'login';
@@ -32,9 +32,9 @@ export function renderAuth(root, { onAuthed }) {
           </form>
         </div>
         <ul class="auth-points">
-          <li><span aria-hidden="true">🎯</span> Ton binôme te fixe tes objectifs du jour</li>
-          <li><span aria-hidden="true">✅</span> Tu coches, il ou elle t'encourage</li>
-          <li><span aria-hidden="true">📈</span> Bilan hebdo, compétences et niveaux</li>
+          <li>${icon('target')} Ton binôme te fixe tes objectifs du jour et de la semaine</li>
+          <li>${icon('camera')} Tu coches, tu ajoutes une preuve, il ou elle t'encourage</li>
+          <li>${icon('trophy')} Bilan hebdo, compétences, badges et niveaux</li>
         </ul>
       </main>`;
   };

@@ -53,6 +53,30 @@ function insideRoundedRect(x, y, r) {
   return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
 }
 
+/** Petite icône monochrome (barre d'état Android) : anneaux blancs sur fond transparent. */
+function renderBadge(size) {
+  const ringR = 0.24;
+  const ringW = 0.09;
+  const centers = [0.5 - 0.13, 0.5 + 0.13];
+  const out = Buffer.alloc(size * size * 4);
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
+      let hit = 0;
+      for (let sy = 0; sy < SAMPLES; sy++) {
+        for (let sx = 0; sx < SAMPLES; sx++) {
+          const x = (px + (sx + 0.5) / SAMPLES) / size;
+          const y = (py + (sy + 0.5) / SAMPLES) / size;
+          if (centers.some((cx) => Math.abs(Math.hypot(x - cx, y - 0.5) - ringR) <= ringW / 2)) hit++;
+        }
+      }
+      const i = (py * size + px) * 4;
+      out[i] = out[i + 1] = out[i + 2] = 255;
+      out[i + 3] = Math.round((hit / (SAMPLES * SAMPLES)) * 255);
+    }
+  }
+  return encodePng(size, out);
+}
+
 function render(size, { maskable }) {
   const radius = maskable ? 0 : 13 / 48;
   const scale = maskable ? 0.78 : 1; // zone de sécurité des icônes « maskable »
@@ -106,5 +130,7 @@ for (const [name, size, maskable] of [
   ['icon-maskable-512.png', 512, true],
 ]) {
   fs.writeFileSync(path.join(OUT_DIR, name), render(size, { maskable }));
-  console.log(`✔ ${name}`);
+  console.log(`ok ${name}`);
 }
+fs.writeFileSync(path.join(OUT_DIR, 'badge-96.png'), renderBadge(96));
+console.log('ok badge-96.png');

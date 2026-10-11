@@ -6,16 +6,22 @@ const os = require('node:os');
 const path = require('node:path');
 const { createStore } = require('./db');
 const { createApi, sendJson } = require('./api');
+const { createPush } = require('./push');
 
 const PORT = Number(process.env.PORT) || 3210;
 const HOST = process.env.HOST || '0.0.0.0';
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, '..', 'data', 'auphine.db');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+// Contact transmis aux services de notification (exigé par la norme VAPID).
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'https://github.com/BAZILA/auphine_process';
 
 const store = createStore(DB_FILE);
-const api = createApi(store);
+const push = createPush(store, { subject: VAPID_SUBJECT });
+const api = createApi(store, { uploadsDir: path.join(path.dirname(DB_FILE), 'uploads'), push });
 api.purgeSessions();
 setInterval(api.purgeSessions, 6 * 3600e3).unref();
+api.startScheduler();
+api.backfillBadges();
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -31,7 +37,7 @@ const TYPES = {
 
 const CSP = [
   "default-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self'",
   "connect-src 'self'",
@@ -118,12 +124,14 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`\n  Auphine est lancé 🚀\n`);
+  console.log('\n  Auphine est lancé\n');
   console.log(`  Sur cet ordinateur : http://localhost:${PORT}`);
   // Adresses du réseau local : pratique pour tester directement sur un téléphone en Wi-Fi.
-  for (const list of Object.values(os.networkInterfaces())) {
-    for (const net of list || []) {
-      if (net.family === 'IPv4' && !net.internal) console.log(`  Sur ton téléphone  : http://${net.address}:${PORT}`);
+  if (HOST === '0.0.0.0') {
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const net of list || []) {
+        if (net.family === 'IPv4' && !net.internal) console.log(`  Sur ton téléphone  : http://${net.address}:${PORT}`);
+      }
     }
   }
   console.log(`\n  Base de données : ${DB_FILE}\n`);
