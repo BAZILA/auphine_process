@@ -1,5 +1,9 @@
 # Auphine — objectifs à deux
 
+> **Avancer à deux, chaque jour.**
+> A.U.P.H.I.N.É : *Avancer Unis, Progresser Humblement, Inspirer, Nourrir l'Élan.*
+> Comme les dauphins, qui nagent en duo et s'entraident sans cesse, on avance plus loin quand quelqu'un avance à côté de nous.
+
 Une appli légère pour **binômes** : chaque jour, tu fixes des objectifs à ton binôme et il ou elle t'en fixe. Chacun coche ce qu'il a fait, ajoute une preuve photo, l'autre réagit et encourage, et **chaque semaine** vous avez un bilan complet : taux de réussite, jour par jour, compétences travaillées, évolution, badges et bilan écrit.
 
 - **Mobile d'abord** : PWA installable sur l'écran d'accueil (Android et iPhone), navigation par onglets en bas, notifications push.
@@ -45,7 +49,13 @@ Au démarrage, le serveur affiche aussi une adresse du réseau local (ex. `http:
 | **Fiche objectif** | Progression, **preuve photo** (réduite automatiquement avant l'envoi), **réactions** (Bravo, En feu, Costaud, J'adore, Courage, Au top) et **discussion** entre binômes. |
 | **Bilan** | Le rendu hebdomadaire, pour moi ou mon binôme : taux de réussite et écart avec la semaine précédente, XP, série de journées parfaites, jour par jour, objectifs de la semaine, compétences, évolution sur 8 semaines, réussites et points à retravailler. Bilan écrit noté sur 5. Partage en un clic. |
 | **Progrès** | Niveau global, **compétences** (niveaux à 100, 300, 600, 1000 XP…), **badges** (15 succès à débloquer) et **calendrier** mensuel de régularité. |
-| **Profil** | Liaison par code à 6 caractères, **notifications** (activation par appareil et choix des alertes), prénom, thème clair/sombre/auto, installation de l'appli. |
+| **Profil** | Liaison par code à 6 caractères, **notifications** (activation par appareil et choix des alertes), prénom, mot de passe, thème, installation de l'appli, « À propos d'Auphine ». |
+| **Barre du haut** | **Cloche** avec pastille de non-lus (centre de notifications dans l'appli) et bouton de **thème** en un geste (auto → clair → sombre). |
+| **Administration** | Réservée aux comptes admin : vue d'ensemble (comptes, activité, réussite, santé du serveur), gestion des comptes (mot de passe, déconnexion, binôme, désactivation, suppression, droits admin), annonces à tous, journal des actions. L'admin ne lit ni les messages ni les photos. |
+
+**Mises à jour** : quand une nouvelle version est déployée, l'appli ouverte affiche « Une nouvelle version d'Auphine est disponible » avec un bouton pour l'appliquer.
+
+**Fluidité** : les écrans déjà visités s'affichent instantanément depuis un cache puis se mettent à jour en arrière-plan ; les onglets sont préchargés ; cocher un objectif est immédiat.
 
 **Notifications** : nouvel objectif fixé, réaction, message, preuve photo, journée bouclée par ton binôme, nouveau badge, rappel à 20 h s'il reste des objectifs, bilan le dimanche à 18 h (à l'heure locale de chacun).
 
@@ -75,6 +85,8 @@ public/
 scripts/
   seed.js      données de démo
   backup.js    sauvegarde de la base et des photos
+  admin.js     nommer / retirer un administrateur
+  keepalive.sh garde l'appli allumée sans pm2 (cron)
   gen-icons.js génère les icônes PNG sans dépendance
 deploy/        fichiers d'exemple pour un VPS avec droits admin
 ```
@@ -102,6 +114,13 @@ Toutes les routes sont sous `/api` et échangent du JSON. Une fois connecté, aj
 | GET | `/calendar?who=&month=AAAA-MM` | Régularité jour par jour sur un mois |
 | GET | `/report?who=&week=` | Bilan hebdomadaire complet |
 | PUT | `/reviews` | Bilan écrit `{ who, week, rating, comment }` |
+| POST | `/me/password` | Changer son mot de passe `{ current, next }` |
+| GET · POST | `/notifications` · `/notifications/read` | Centre de notifications (la cloche) |
+| GET | `/meta` | Nom, version et empreinte de l'interface déployée |
+| GET | `/admin/overview` · `/admin/users` · `/admin/log` | Administration : statistiques, comptes, journal |
+| POST | `/admin/users/:id/(password\|logout\|unpair\|disabled\|admin)` | Actions sur un compte |
+| DELETE | `/admin/users/:id` | Supprimer un compte (objectifs, messages, photos) |
+| POST | `/admin/broadcast` | Annonce à tous les comptes |
 | GET | `/push/key` | Clé publique VAPID |
 | POST | `/push/subscribe` · `/push/unsubscribe` · `/push/test` | Abonnement de l'appareil |
 
@@ -109,7 +128,7 @@ Toutes les routes sont sous `/api` et échangent du JSON. Une fois connecté, aj
 
 Guide pas à pas dans [DEPLOY.md](DEPLOY.md) : serveur avec panneau sans droits admin (nvm, pm2, Apache), ou VPS avec droits admin (systemd, Caddy), sauvegardes et mises à jour.
 
-Mise à jour du serveur en ligne : `cd ~/apps/auphine && git pull && pm2 restart auphine` (la base est migrée automatiquement).
+Mise à jour du serveur en ligne : `cd ~/apps/auphine && git pull && source ~/.nvm/nvm.sh && NODE=$(which node) sh scripts/keepalive.sh restart` (la base est migrée automatiquement).
 
 ## Feuille de route : idées d'amélioration
 

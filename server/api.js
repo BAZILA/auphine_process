@@ -158,7 +158,15 @@ function createLimiter({ max = 10, windowMs = 15 * 60e3 } = {}) {
   };
 }
 
-function createApi(db, { uploadsDir, push = null } = {}) {
+function dirSize(dir) {
+  let total = 0;
+  try {
+    for (const name of fs.readdirSync(dir)) total += fs.statSync(path.join(dir, name)).size;
+  } catch { /* dossier absent */ }
+  return total;
+}
+
+function createApi(db, { uploadsDir, dbFile, push = null, version = { version: '0', build: 'dev' } } = {}) {
   const routes = [];
   const route = (method, pattern, handler, { auth = true, raw = false } = {}) => {
     const keys = [];
@@ -167,11 +175,19 @@ function createApi(db, { uploadsDir, push = null } = {}) {
   };
   const loginLimiter = createLimiter();
 
-  // Les notifications partent en arrière-plan : un échec ne bloque jamais la requête.
-  const notify = (userId, payload, pref) => {
-    if (!push || !userId) return;
-    push.notify(userId, payload, pref).catch((err) => console.error('[push]', err.message));
+  /**
+   * Prévient un utilisateur : l'événement est rangé dans son centre de notifications (la cloche),
+   * puis envoyé en push sur ses appareils. Le push part en arrière-plan : un échec ne bloque jamais la requête.
+   */
+  const notify = (userId, payload, kind) => {
+    if (!userId) return;
+    db.run(
+      'INSERT INTO notifications (user_id, kind, title, body, url) VALUES (?, ?, ?, ?, ?)',
+      userId, kind || 'info', payload.title, payload.body || '', payload.url || '',
+    );
+    if (push) push.notify(userId, payload, kind).catch((err) => console.error('[push]', err.message));
   };
+  const unreadCount = (uid) => db.get('SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL', uid).n;
 
   // --- Accès aux données ----------------------------------------------------
   const userById = (id) => db.get('SELECT * FROM users WHERE id = ?', id);
@@ -196,7 +212,7 @@ function createApi(db, { uploadsDir, push = null } = {}) {
     const m = /^Bearer\s+(\S+)$/.exec(req.headers.authorization || '');
     if (!m) return {};
     const me = db.get(
-      'SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?',
+      'SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0',
       L.hashToken(m[1]), Date.now(),
     );
     return me ? { me, token: m[1] } : {};
@@ -207,7 +223,10 @@ function createApi(db, { uploadsDir, push = null } = {}) {
   function profile(me) {
     const partner = me.partner_id ? userById(me.partner_id) : null;
     return {
-      user: { id: me.id, name: me.name, email: me.email, inviteCode: me.invite_code, notifPrefs: notifPrefs(me) },
+      user: {
+        id: me.id, name: me.name, email: me.email, inviteCode: me.invite_code, notifPrefs: notifPrefs(me),
+        isAdmin: Boolean(me.is_admin), unread: unreadCount(me.id),
+      },
       partner: partner ? { id: partner.id, name: partner.name } : null,
     };
   }
@@ -394,6 +413,7 @@ function createApi(db, { uploadsDir, push = null } = {}) {
       fail(401, 'E-mail ou mot de passe incorrect');
     }
     loginLimiter.reset(ip);
+    if (user.disabled) fail(403, "Ce compte a été désactivé. Contacte l'administrateur.");
     return { token: createSession(user.id), ...profile(user) };
   }, { auth: false });
 
@@ -416,6 +436,24 @@ function createApi(db, { uploadsDir, push = null } = {}) {
       db.run('UPDATE users SET notif_prefs = ? WHERE id = ?', JSON.stringify({ ...notifPrefs(me), ...prefs }), me.id);
     }
     return profile(userById(me.id));
+  });
+
+  route('POST', '/me/password', async ({ me, body, token, ip }) => {
+    loginLimiter.check(ip);
+    if (!(await L.verifyPassword(String(body.current || ''), me.password_hash))) {
+      loginLimiter.fail(ip);
+      fail(400, 'Mot de passe actuel incorrect');
+    }
+    const next = typeof body.next === 'string' ? body.next : '';
+    if (next.length < 8) fail(400, 'Nouveau mot de passe : 8 caractères minimum');
+    if (next.length > 200) fail(400, 'Mot de passe trop long');
+    const hash = await L.hashPassword(next);
+    // Les autres appareils sont déconnectés ; celui-ci reste connecté.
+    db.tx(() => {
+      db.run('UPDATE users SET password_hash = ? WHERE id = ?', hash, me.id);
+      db.run('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?', me.id, L.hashToken(token));
+    });
+    return { ok: true };
   });
 
   route('POST', '/me/invite-code', ({ me }) => {
@@ -783,6 +821,181 @@ function createApi(db, { uploadsDir, push = null } = {}) {
     return { delivered };
   });
 
+  // =========================================================================
+  // Centre de notifications (la cloche) et version
+  // =========================================================================
+  route('GET', '/notifications', ({ me }) => ({
+    items: db.all(
+      `SELECT id, kind, title, body, url, created_at AS createdAt, read_at IS NOT NULL AS read
+       FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 60`,
+      me.id,
+    ),
+    unread: unreadCount(me.id),
+  }));
+
+  route('POST', '/notifications/read', ({ me }) => {
+    db.run("UPDATE notifications SET read_at = datetime('now') WHERE user_id = ? AND read_at IS NULL", me.id);
+    return { unread: 0 };
+  });
+
+  route('GET', '/meta', () => ({ name: 'Auphine', ...version }), { auth: false });
+
+  // =========================================================================
+  // Administration (comptes avec is_admin = 1, voir scripts/admin.js)
+  // Volontairement, l'admin ne lit ni les messages ni les photos des binômes.
+  // =========================================================================
+  const requireAdmin = (me) => {
+    if (!me.is_admin) fail(403, 'Réservé aux administrateurs');
+  };
+  const logAdmin = (me, action, target = '') =>
+    db.run('INSERT INTO admin_log (admin_id, action, target) VALUES (?, ?, ?)', me.id, action, target);
+  function adminTarget(me, id, { notSelf = false } = {}) {
+    requireAdmin(me);
+    const u = userById(Number(id));
+    if (!u) fail(404, 'Compte introuvable');
+    if (notSelf && u.id === me.id) fail(400, 'Action impossible sur ton propre compte');
+    return u;
+  }
+  const label = (u) => `${u.name} <${u.email}>`;
+
+  route('GET', '/admin/overview', ({ me, today }) => {
+    requireAdmin(me);
+    const n = (sql, ...p) => db.get(sql, ...p).n;
+    const monday = L.mondayOf(today);
+    const week = stats(db.all(
+      'SELECT day, period, status, difficulty FROM goals WHERE day BETWEEN ? AND ?', monday, L.addDays(monday, 6),
+    ), today);
+    const from = L.addDays(today, -13);
+    const signups = new Map(db.all(
+      "SELECT date(created_at) AS d, COUNT(*) AS n FROM users WHERE created_at >= date(?, '-1 day') GROUP BY d", from,
+    ).map((r) => [r.d, r.n]));
+    const done = new Map(db.all(
+      "SELECT day AS d, COUNT(*) AS n FROM goals WHERE status = 'done' AND period = 'day' AND day BETWEEN ? AND ? GROUP BY day",
+      from, today,
+    ).map((r) => [r.d, r.n]));
+    const days = Array.from({ length: 14 }, (_, i) => {
+      const d = L.addDays(from, i);
+      return { day: d, signups: signups.get(d) || 0, done: done.get(d) || 0 };
+    });
+    let dbSize = 0;
+    for (const f of [dbFile, `${dbFile}-wal`]) {
+      try {
+        dbSize += fs.statSync(f).size;
+      } catch { /* fichier absent */ }
+    }
+    return {
+      users: n('SELECT COUNT(*) AS n FROM users'),
+      active1: n("SELECT COUNT(*) AS n FROM users WHERE last_seen >= datetime('now', '-1 day')"),
+      active7: n("SELECT COUNT(*) AS n FROM users WHERE last_seen >= datetime('now', '-7 days')"),
+      pairs: n('SELECT COUNT(*) AS n FROM users WHERE partner_id IS NOT NULL') / 2,
+      admins: n('SELECT COUNT(*) AS n FROM users WHERE is_admin = 1'),
+      disabled: n('SELECT COUNT(*) AS n FROM users WHERE disabled = 1'),
+      goals: n('SELECT COUNT(*) AS n FROM goals'),
+      messages: n('SELECT COUNT(*) AS n FROM messages'),
+      photos: n('SELECT COUNT(*) AS n FROM goals WHERE photo IS NOT NULL'),
+      devices: n('SELECT COUNT(*) AS n FROM push_subscriptions'),
+      week: { total: week.total, done: week.done, rate: week.rate },
+      days,
+      server: {
+        ...version,
+        node: process.version,
+        uptime: Math.round(process.uptime()),
+        memory: process.memoryUsage().rss,
+        dbSize,
+        uploadsSize: dirSize(uploadsDir),
+      },
+    };
+  });
+
+  route('GET', '/admin/users', ({ me }) => {
+    requireAdmin(me);
+    return db.all(
+      `SELECT u.id, u.name, u.email, u.created_at AS createdAt, u.last_seen AS lastSeen,
+              u.is_admin AS isAdmin, u.disabled, p.name AS partnerName,
+              (SELECT COUNT(*) FROM goals g WHERE g.assignee_id = u.id) AS goals,
+              (SELECT COUNT(*) FROM goals g WHERE g.assignee_id = u.id AND g.status = 'done') AS done,
+              (SELECT COUNT(*) FROM push_subscriptions s WHERE s.user_id = u.id) AS devices
+       FROM users u LEFT JOIN users p ON p.id = u.partner_id
+       ORDER BY u.created_at DESC LIMIT 1000`,
+    );
+  });
+
+  route('POST', '/admin/users/:id/disabled', ({ me, params, body }) => {
+    const u = adminTarget(me, params.id, { notSelf: true });
+    const disabled = body.disabled ? 1 : 0;
+    db.tx(() => {
+      db.run('UPDATE users SET disabled = ? WHERE id = ?', disabled, u.id);
+      if (disabled) {
+        db.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+        db.run('DELETE FROM push_subscriptions WHERE user_id = ?', u.id);
+      }
+    });
+    logAdmin(me, disabled ? 'Compte désactivé' : 'Compte réactivé', label(u));
+    return { ok: true };
+  });
+
+  route('POST', '/admin/users/:id/logout', ({ me, params }) => {
+    const u = adminTarget(me, params.id);
+    const { changes } = db.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+    logAdmin(me, 'Déconnexion de tous les appareils', label(u));
+    return { sessions: changes };
+  });
+
+  route('POST', '/admin/users/:id/password', async ({ me, params }) => {
+    const u = adminTarget(me, params.id);
+    const password = L.newInviteCode(12);
+    const hash = await L.hashPassword(password);
+    db.tx(() => {
+      db.run('UPDATE users SET password_hash = ? WHERE id = ?', hash, u.id);
+      db.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+    });
+    logAdmin(me, 'Mot de passe réinitialisé', label(u));
+    return { password };
+  });
+
+  route('POST', '/admin/users/:id/unpair', ({ me, params }) => {
+    const u = adminTarget(me, params.id);
+    if (u.partner_id) db.run('UPDATE users SET partner_id = NULL WHERE id IN (?, ?)', u.id, u.partner_id);
+    logAdmin(me, 'Binôme délié', label(u));
+    return { ok: true };
+  });
+
+  route('POST', '/admin/users/:id/admin', ({ me, params, body }) => {
+    const u = adminTarget(me, params.id, { notSelf: true });
+    db.run('UPDATE users SET is_admin = ? WHERE id = ?', body.isAdmin ? 1 : 0, u.id);
+    logAdmin(me, body.isAdmin ? 'Droits admin donnés' : 'Droits admin retirés', label(u));
+    return { ok: true };
+  });
+
+  route('DELETE', '/admin/users/:id', ({ me, params }) => {
+    const u = adminTarget(me, params.id, { notSelf: true });
+    const photos = db.all(
+      'SELECT photo FROM goals WHERE (assignee_id = ? OR author_id = ?) AND photo IS NOT NULL', u.id, u.id,
+    );
+    db.run('DELETE FROM users WHERE id = ?', u.id);
+    photos.forEach((p) => removePhoto(p.photo));
+    logAdmin(me, 'Compte supprimé', label(u));
+    return { ok: true };
+  });
+
+  route('POST', '/admin/broadcast', ({ me, body }) => {
+    requireAdmin(me);
+    const title = text(body.title, 'Titre', 1, 80);
+    const message = text(body.body, 'Message', 0, 300);
+    const users = db.all('SELECT id FROM users WHERE disabled = 0');
+    for (const u of users) notify(u.id, { title, body: message, url: '/#/today', tag: 'annonce' }, 'admin');
+    logAdmin(me, 'Annonce envoyée', title);
+    return { sent: users.length };
+  });
+
+  route('GET', '/admin/log', ({ me }) => {
+    requireAdmin(me);
+    return db.all(
+      `SELECT l.id, l.action, l.target, l.created_at AS createdAt, u.name AS adminName
+       FROM admin_log l LEFT JOIN users u ON u.id = l.admin_id ORDER BY l.id DESC LIMIT 150`,
+    );
+  });
+
   // Rappels programmés : vérifiés toutes les 5 minutes, à l'heure locale de chacun.
   function tick() {
     if (!push) return;
@@ -835,6 +1048,8 @@ function createApi(db, { uploadsDir, push = null } = {}) {
   // Routage
   // =========================================================================
   async function handle(req, res, url) {
+    // Version déployée : l'appli la compare à la sienne pour proposer la mise à jour.
+    res.setHeader('X-App-Version', version.build);
     const pathname = url.pathname.replace(/^\/api/, '') || '/';
     const candidates = routes.filter((r) => r.re.test(pathname));
     if (!candidates.length) return sendJson(res, 404, { error: 'Route inconnue' });
@@ -855,6 +1070,9 @@ function createApi(db, { uploadsDir, push = null } = {}) {
       if (r.auth) {
         Object.assign(ctx, authenticate(req));
         if (!ctx.me) fail(401, 'Session expirée, reconnecte-toi');
+        // Dernière activité (mise à jour au plus toutes les 5 minutes).
+        const seen = ctx.me.last_seen ? Date.parse(`${ctx.me.last_seen.replace(' ', 'T')}Z`) : 0;
+        if (Date.now() - seen > 5 * 60e3) db.run("UPDATE users SET last_seen = datetime('now') WHERE id = ?", ctx.me.id);
         // Mémorise le fuseau horaire de l'utilisateur pour les rappels programmés.
         const tz = req.headers['x-timezone'];
         if (tz && tz !== ctx.me.timezone && isTimeZone(tz)) db.run('UPDATE users SET timezone = ? WHERE id = ?', tz, ctx.me.id);
@@ -870,7 +1088,10 @@ function createApi(db, { uploadsDir, push = null } = {}) {
     }
   }
 
-  const purgeSessions = () => db.run('DELETE FROM sessions WHERE expires_at < ?', Date.now());
+  const purgeSessions = () => {
+    db.run('DELETE FROM sessions WHERE expires_at < ?', Date.now());
+    db.run("DELETE FROM notifications WHERE created_at < datetime('now', '-60 days')");
+  };
 
   /**
    * Enregistre en silence les badges déjà mérités par les comptes qui ont un historique

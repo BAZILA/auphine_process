@@ -1,7 +1,7 @@
 // Vue « Profil » : compte, binôme, notifications, apparence, installation.
-import { post, patch, del, setToken } from '../api.js';
+import { get, post, patch, del, setToken } from '../api.js';
 import { state, setProfile } from '../state.js';
-import { esc, icon, delegate, busy, toast, confirmBox, segmented, getTheme, setTheme, firstName, initial } from '../ui.js';
+import { esc, icon, delegate, busy, toast, confirmBox, segmented, getTheme, setTheme, firstName, initial, THEMES } from '../ui.js';
 import { pairCard, pairHandlers } from '../components.js';
 import { pushSupported, currentSubscription, enablePush, disablePush } from '../push.js';
 
@@ -48,8 +48,33 @@ async function notificationsCard() {
     <button type="button" class="btn btn-ghost btn-block" data-action="pushOff">${icon('bell-off')} Désactiver sur cet appareil</button>`;
 }
 
+const ABOUT = [
+  ['A', 'Avancer', 'chaque jour un pas, avec les objectifs du jour'],
+  ['U', 'Unis', 'à deux : ton binôme fixe tes objectifs, tu fixes les siens'],
+  ['P', 'Progresser', 'compétences, XP et niveaux pour mesurer le chemin'],
+  ['H', 'Humblement', 'des objectifs atteignables : le « partiel » compte aussi'],
+  ['I', 'Inspirer', 'réactions, messages et preuves pour se tirer vers le haut'],
+  ['N', 'Nourrir', 'la régularité avec les séries et les badges'],
+  ['É', 'l\'Élan', 'et le bilan de chaque semaine pour repartir plus fort'],
+];
+
+const aboutCard = (meta) => `
+  <div class="card about">
+    <div class="about-head">
+      ${icon('sparkles')}
+      <div><strong>Avancer à deux, chaque jour.</strong>
+      <p class="small muted">A.U.P.H.I.N.É : Avancer Unis, Progresser Humblement, Inspirer, Nourrir l'Élan.</p></div>
+    </div>
+    <ul class="acro">
+      ${ABOUT.map(([l, w, t]) => `<li><span class="acro-l">${l}</span><span><strong>${esc(w)}</strong> <span class="muted">· ${esc(t)}</span></span></li>`).join('')}
+    </ul>
+    <p class="small muted">Comme les dauphins, qui nagent en duo et s'entraident sans cesse, on avance plus loin quand quelqu'un avance à côté de nous.</p>
+    <p class="small muted">Version ${esc(meta?.version || '')}</p>
+  </div>`;
+
 export async function ProfileView(ctx) {
   const { me, partner } = state;
+  const meta = await get('/meta').catch(() => null);
 
   let install;
   if (isStandalone()) install = `<p class="small muted ok-line">${icon('check-circle', 'sm')} Auphine est installée sur cet appareil.</p>`;
@@ -103,8 +128,37 @@ export async function ProfileView(ctx) {
       <div class="card">${install}</div>
     </section>
 
+    <section class="section">
+      <div class="section-head"><h2>Sécurité</h2></div>
+      <details class="card fold">
+        <summary><span class="fold-ico ok">${icon('key', 'sm')}</span>Changer mon mot de passe</summary>
+        <form data-form="password" class="stack">
+          <label class="field"><span>Mot de passe actuel</span>
+            <input name="current" type="password" required autocomplete="current-password"></label>
+          <label class="field"><span>Nouveau mot de passe</span>
+            <input name="next" type="password" required minlength="8" maxlength="200" autocomplete="new-password" placeholder="8 caractères minimum"></label>
+          <button type="submit" class="btn btn-primary btn-block">Mettre à jour</button>
+          <p class="hint">Tes autres appareils seront déconnectés.</p>
+        </form>
+      </details>
+    </section>
+
+    ${me.isAdmin ? `
+      <section class="section">
+        <a class="card banner admin-link" href="#/admin">
+          <span class="banner-icon">${icon('shield')}</span>
+          <span><strong>Administration</strong><br><span class="muted">Comptes, activité, annonces, santé du serveur.</span></span>
+          ${icon('chevR')}
+        </a>
+      </section>` : ''}
+
+    <section class="section">
+      <div class="section-head"><h2>À propos d'Auphine</h2></div>
+      ${aboutCard(meta)}
+    </section>
+
     <button type="button" class="btn btn-ghost btn-block mt" data-action="logout">${icon('logout')} Se déconnecter</button>
-    <p class="footer-note">Auphine · v0.2</p>`;
+    <p class="footer-note">Auphine · v${esc(meta?.version || '')}</p>`;
 
   return {
     html,
@@ -124,6 +178,11 @@ export async function ProfileView(ctx) {
         setProfile(await patch('/me', { name: form.elements.displayName.value }));
         toast('Prénom mis à jour', 'success');
         ctx.rerender();
+      }),
+      password: (form) => busy(form, async () => {
+        await post('/me/password', { current: form.elements.current.value, next: form.elements.next.value });
+        form.reset();
+        toast('Mot de passe mis à jour', 'success', 'key');
       }),
       pushOn: (el) => busy(el, async () => {
         await enablePush();
@@ -149,6 +208,8 @@ export async function ProfileView(ctx) {
       },
       theme: (el) => {
         setTheme(el.dataset.value);
+        const topBtn = document.querySelector('.topbar [data-action="theme"]');
+        if (topBtn) topBtn.innerHTML = icon(THEMES[el.dataset.value].icon);
         ctx.rerender();
       },
       install: async () => {

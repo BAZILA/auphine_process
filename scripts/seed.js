@@ -72,7 +72,7 @@ async function main() {
       'INSERT INTO users (name, email, password_hash, invite_code) VALUES (?, ?, ?, ?)',
       p.name, p.email, hash, L.newInviteCode(),
     ).lastInsertRowid);
-    db.run('UPDATE users SET partner_id = ? WHERE id = ?', ids[1], ids[0]);
+    db.run('UPDATE users SET partner_id = ?, is_admin = 1 WHERE id = ?', ids[1], ids[0]); // Alice : admin de démo
     db.run('UPDATE users SET partner_id = ? WHERE id = ?', ids[0], ids[1]);
 
     const addGoal = (g) => {

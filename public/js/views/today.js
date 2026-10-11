@@ -75,10 +75,18 @@ export async function TodayView(ctx) {
       toggle: (el) => busy(el, async () => {
         const g = find(el);
         const status = g.status === 'done' ? 'todo' : 'done';
-        const res = await patch(`/goals/${g.id}`, { status });
-        if (status === 'done') {
-          state.justDone = g.id;
-          toast(`+${DIFFICULTY[g.difficulty].xp} XP`, 'success', 'zap');
+        // Retour visuel immédiat, sans attendre le serveur.
+        const card = el.closest('.goal');
+        card.classList.remove('st-todo', 'st-missed', 'st-partial', 'st-done', 'flash');
+        void card.offsetWidth; // relance l'animation
+        card.classList.add(status === 'done' ? 'st-done' : 'st-todo', 'flash');
+        if (status === 'done') toast(`+${DIFFICULTY[g.difficulty].xp} XP`, 'success', 'zap');
+        let res;
+        try {
+          res = await patch(`/goals/${g.id}`, { status });
+        } catch (err) {
+          ctx.rerender({ fresh: true }); // on remet l'état réel
+          throw err;
         }
         await ctx.rerender();
         celebrateBadges(res.newBadges);

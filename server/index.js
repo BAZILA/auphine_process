@@ -1,6 +1,7 @@
 'use strict';
 // Serveur HTTP : API JSON sous /api + fichiers statiques de la PWA (dossier public/).
 const http = require('node:http');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -15,9 +16,29 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 // Contact transmis aux services de notification (exigé par la norme VAPID).
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'https://github.com/BAZILA/auphine_process';
 
+const INDEX_FILE = path.join(PUBLIC_DIR, 'index.html');
+
+/**
+ * Empreinte de l'interface déployée : change dès qu'un fichier de public/ change.
+ * L'appli la compare avec la sienne pour proposer « Nouvelle version disponible ».
+ */
+function computeBuild() {
+  const hash = crypto.createHash('sha1');
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else hash.update(path.relative(PUBLIC_DIR, full)).update(fs.readFileSync(full));
+    }
+  };
+  walk(PUBLIC_DIR);
+  return hash.digest('hex').slice(0, 10);
+}
+const VERSION = { version: require('../package.json').version, build: computeBuild() };
+
 const store = createStore(DB_FILE);
 const push = createPush(store, { subject: VAPID_SUBJECT });
-const api = createApi(store, { uploadsDir: path.join(path.dirname(DB_FILE), 'uploads'), push });
+const api = createApi(store, { uploadsDir: path.join(path.dirname(DB_FILE), 'uploads'), dbFile: DB_FILE, push, version: VERSION });
 api.purgeSessions();
 setInterval(api.purgeSessions, 6 * 3600e3).unref();
 api.startScheduler();
@@ -56,6 +77,12 @@ function setSecurityHeaders(res) {
 }
 
 function sendFile(req, res, file, stat) {
+  // La page d'accueil embarque l'empreinte de la version servie.
+  if (file === INDEX_FILE) {
+    const html = fs.readFileSync(file, 'utf8').replace('{{BUILD}}', VERSION.build);
+    res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
+    return res.end(req.method === 'HEAD' ? undefined : html);
+  }
   const lastModified = stat.mtime.toUTCString();
   const since = req.headers['if-modified-since'];
   if (since && Math.floor(stat.mtimeMs / 1000) <= Math.floor(Date.parse(since) / 1000)) {

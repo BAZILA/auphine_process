@@ -12,6 +12,7 @@ export function renderAuth(root, { onAuthed }) {
         <div class="auth-hero">
           ${logo(64)}
           <h1>Auphine</h1>
+          <p class="slogan">Avancer à deux, chaque jour.</p>
           <p>Fixez-vous des objectifs l'un l'autre, chaque jour.<br>Faites le bilan ensemble, chaque semaine.</p>
         </div>
         <div class="card auth-card">

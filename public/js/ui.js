@@ -51,7 +51,14 @@ const ICONS = {
   sparkles: '<path d="M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   flag: '<path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/>',
   circle: '<circle cx="12" cy="12" r="5"/>',
-  // récompenses
+  contrast: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M14 9l2 2"/>',
+  ban: '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
+  megaphone: '<path d="M3 10v4a1 1 0 0 0 1 1h3l6 4V5L7 9H4a1 1 0 0 0-1 1z"/><path d="M17 8a5 5 0 0 1 0 8"/>',
+  server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5h.01"/>',
+  'user-x': '<circle cx="9" cy="8" r="4"/><path d="M2 21c1-4 3.6-6 7-6 1.6 0 3 .4 4.2 1.2M16 15l5 5M21 15l-5 5"/>',  // récompenses
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   trophy: '<path d="M8 21h8M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3"/>',
   award: '<circle cx="12" cy="9" r="6"/><path d="M8.5 14L7 22l5-3 5 3-1.5-8"/>',
@@ -86,15 +93,19 @@ const ICONS = {
 export const icon = (name, cls = '') =>
   `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.circle}</svg>`;
 
-export const logo = (size = 40) => `
+let logoCount = 0;
+export const logo = (size = 40) => {
+  const id = `logo-g${++logoCount}`; // un dégradé par logo : un logo masqué ne doit pas priver les autres de couleur
+  return `
   <svg class="logo" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">
-    <defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#6d5dfc"/><stop offset="1" stop-color="#ff7a59"/>
     </linearGradient></defs>
-    <rect width="48" height="48" rx="13" fill="url(#logo-g)"/>
+    <rect width="48" height="48" rx="13" fill="url(#${id})"/>
     <circle cx="19" cy="24" r="9" fill="none" stroke="#fff" stroke-width="3.6"/>
     <circle cx="29" cy="24" r="9" fill="none" stroke="#fff" stroke-opacity=".85" stroke-width="3.6"/>
   </svg>`;
+};
 
 // ---------------------------------------------------------------------------
 // Constantes métier côté interface
@@ -186,6 +197,24 @@ export function delegate(root, handlers) {
     const fn = el && handlers[el.dataset.change];
     if (fn) fn(el, e);
   };
+  root.oninput = (e) => {
+    const el = e.target.closest('[data-input]');
+    const fn = el && handlers[el.dataset.input];
+    if (fn) fn(el, e);
+  };
+}
+
+/** « à l'instant », « il y a 5 min », « hier », « 12 oct. » (date SQL en UTC ou ISO). */
+export function timeAgo(value) {
+  if (!value) return 'jamais';
+  const d = new Date(/[zZ]$/.test(value) ? value : `${value.replace(' ', 'T')}Z`);
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 60) return "à l'instant";
+  if (s < 3600) return `il y a ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `il y a ${Math.floor(s / 3600)} h`;
+  if (s < 172800) return 'hier';
+  if (s < 7 * 86400) return `il y a ${Math.floor(s / 86400)} j`;
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 }
 
 /** Désactive le bouton pendant l'action et affiche l'erreur éventuelle. */
@@ -387,4 +416,18 @@ export function setTheme(value) {
   } catch { /* ignoré */ }
   if (value === 'auto') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = value;
+}
+
+export const THEMES = {
+  auto: { label: 'Automatique', icon: 'contrast' },
+  light: { label: 'Clair', icon: 'sun' },
+  dark: { label: 'Sombre', icon: 'moon' },
+};
+
+/** Passe au thème suivant : automatique → clair → sombre → automatique. */
+export function cycleTheme() {
+  const order = ['auto', 'light', 'dark'];
+  const next = order[(order.indexOf(getTheme()) + 1) % order.length];
+  setTheme(next);
+  return next;
 }

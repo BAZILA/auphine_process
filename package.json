@@ -1,8 +1,8 @@
 {
   "name": "auphine",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Objectifs quotidiens fixés entre binômes, avec bilan hebdomadaire, compétences et niveaux.",
+  "description": "Auphine : avancer à deux, chaque jour. Objectifs fixés entre binômes, bilan hebdomadaire, compétences, badges et notifications.",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22.13"

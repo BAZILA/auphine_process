@@ -10,6 +10,7 @@ export const state = {
   progressWho: 'me', // vue Progrès : 'me' | 'partner'
   progressTab: 'skills', // 'skills' | 'badges' | 'calendar'
   calMonth: today().slice(0, 7),
+  adminTab: 'overview', // 'overview' | 'users' | 'broadcast' | 'log'
   justDone: null,    // id d'un objectif qui vient d'être coché (animation)
   installPrompt: null,
 };

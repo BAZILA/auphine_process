@@ -14,12 +14,12 @@ Dans les deux cas, **le HTTPS est obligatoire** pour installer l'appli sur un t�
 Après avoir poussé les modifications sur GitHub, sur le serveur :
 
 ```bash
-cd ~/apps/auphine && git pull && pm2 restart auphine
+cd ~/apps/auphine && git pull && source ~/.nvm/nvm.sh && NODE=$(which node) sh scripts/keepalive.sh restart
 ```
 
 - **Ne reclone jamais le projet** : la base (`data/auphine.db`) et les photos (`data/uploads/`) ne sont pas dans Git, et supprimer le dossier les effacerait.
 - Les évolutions de la base (nouvelles colonnes, etc.) sont appliquées **automatiquement** au redémarrage.
-- Pour vérifier que tout va bien : `pm2 logs auphine --lines 20 --nostream`.
+- Pour vérifier que tout va bien : `tail -20 ~/apps/auphine/data/auphine.log`.
 
 ---
 
@@ -44,14 +44,17 @@ nvm install 22
 mkdir -p ~/apps && git clone https://github.com/BAZILA/auphine_process.git ~/apps/auphine
 ```
 
-### 4. Lancer l'appli en permanence avec pm2
+### 4. Lancer l'appli en permanence (sans pm2)
+Les comptes d'hébergement limitent souvent le nombre de processus (40 ici, `ulimit -u`) : pm2 en consomme trop.
+Le script `scripts/keepalive.sh` lance l'appli avec peu de sous-processus, et cron le rappelle chaque minute
+pour la relancer si besoin (y compris après un redémarrage du serveur) :
 ```bash
-npm install -g pm2
-cd ~/apps/auphine && HOST=127.0.0.1 TRUST_PROXY=1 pm2 start server/index.js --name auphine --node-args="--disable-warning=ExperimentalWarning"
-pm2 save
-(crontab -l 2>/dev/null; echo "@reboot $(which node) $(which pm2) resurrect") | crontab -
+source ~/.nvm/nvm.sh
+(crontab -l 2>/dev/null | grep -v -e 'auphine/scripts/'; echo "* * * * * NODE=$(which node) sh $HOME/apps/auphine/scripts/keepalive.sh >/dev/null 2>&1") | crontab -
+NODE=$(which node) sh ~/apps/auphine/scripts/keepalive.sh
 ```
 Vérification : `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3210/` doit afficher `200`.
+Journal de l'appli : `~/apps/auphine/data/auphine.log`.
 
 ### 5. Relier le domaine à l'appli (Apache)
 Dans le dossier web du sous-domaine :
@@ -75,7 +78,8 @@ Les domaines en `.dev` s'ouvrent **toujours** en HTTPS dans les navigateurs : av
 
 ### 7. Sauvegardes automatiques (base + photos, 14 jours gardés dans `~/backups/auphine`)
 ```bash
-(crontab -l 2>/dev/null; echo "0 3 * * * $(which node) --disable-warning=ExperimentalWarning $HOME/apps/auphine/scripts/backup.js") | crontab -
+source ~/.nvm/nvm.sh
+(crontab -l 2>/dev/null; echo "0 3 * * * $(which node) --disable-warning=ExperimentalWarning $HOME/apps/auphine/scripts/backup.js >/dev/null 2>&1") | crontab -
 ```
 Test immédiat : `cd ~/apps/auphine && npm run backup`.
 Copie aussi ces sauvegardes hors du serveur de temps en temps.
@@ -125,6 +129,16 @@ Journaux : `sudo journalctl -u auphine -f`.
 
 ---
 
+## Compte administrateur
+
+Crée d'abord ton compte dans l'appli, puis sur le serveur :
+```bash
+cd ~/apps/auphine && source ~/.nvm/nvm.sh && node --disable-warning=ExperimentalWarning scripts/admin.js promote ton@email.fr
+```
+Recharge l'appli : la carte **Administration** apparaît dans le Profil (et dans la barre latérale sur ordinateur).
+Autres commandes : `scripts/admin.js list` et `scripts/admin.js demote ton@email.fr`.
+Un admin peut ensuite donner les droits à d'autres comptes depuis l'appli.
+
 ## Notifications push
 
 - Rien à installer : les clés de sécurité (VAPID) sont générées au premier démarrage et gardées dans la base.
@@ -136,7 +150,9 @@ Journaux : `sudo journalctl -u auphine -f`.
 
 | Symptôme | Piste |
 |---|---|
-| `502` / `503` | L'appli ne tourne pas : `pm2 status` puis `pm2 logs auphine --lines 50 --nostream` |
+| `502` / `503` | L'appli ne tourne pas : `tail -50 ~/apps/auphine/data/auphine.log` |
+| `fork: Resource temporarily unavailable` | Limite de processus du compte atteinte : ferme les vieilles sessions SSH, n'utilise pas pm2 |
+| `node: command not found` | Node n'est pas chargé dans la session : `source ~/.nvm/nvm.sh` |
 | Page « Introuvable » à l'accueil | Le `.htaccess` n'a pas la ligne `DirectoryIndex disabled` |
 | Pas de certificat HTTPS | Le DNS ne pointe pas encore vers le serveur |
 | `Le port 3210 est déjà utilisé` | Lance avec un autre `PORT=` et mets le même port dans le `.htaccess` |

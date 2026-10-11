@@ -1,6 +1,6 @@
 // Service worker : cache de l'interface (démarrage rapide, affichage hors ligne) et notifications push.
 // Stratégie « réseau d'abord » : les mises à jour sont visibles immédiatement quand on est en ligne.
-const CACHE = 'auphine-v2';
+const CACHE = 'auphine-v3';
 const SHELL = [
   '/',
   '/index.html',
@@ -14,7 +14,9 @@ const SHELL = [
   '/js/push.js',
   '/js/state.js',
   '/js/ui.js',
+  '/js/views/admin.js',
   '/js/views/auth.js',
+  '/js/views/notifications.js',
   '/js/views/goal-form.js',
   '/js/views/goal-sheet.js',
   '/js/views/partner.js',
@@ -66,14 +68,18 @@ self.addEventListener('push', (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : '' };
   }
-  event.waitUntil(self.registration.showNotification(data.title || 'Auphine', {
-    body: data.body || '',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/badge-96.png',
-    tag: data.tag,
-    renotify: Boolean(data.tag),
-    data: { url: data.url || '/' },
-  }));
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(data.title || 'Auphine', {
+      body: data.body || '',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/badge-96.png',
+      tag: data.tag,
+      renotify: Boolean(data.tag),
+      data: { url: data.url || '/' },
+    }),
+    // Si l'appli est ouverte, sa cloche se met à jour tout de suite.
+    self.clients.matchAll({ type: 'window' }).then((list) => list.forEach((c) => c.postMessage({ type: 'push' }))),
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {

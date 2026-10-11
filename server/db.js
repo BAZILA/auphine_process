@@ -134,6 +134,36 @@ const MIGRATIONS = [
       UPDATE goals SET note = '', feedback = '';
     `);
   },
+
+  // 2 : administration, centre de notifications, dernière activité
+  (db) => {
+    db.exec(`
+      ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE users ADD COLUMN last_seen TEXT;
+
+      CREATE TABLE notifications (
+        id         INTEGER PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind       TEXT NOT NULL DEFAULT 'info',
+        title      TEXT NOT NULL,
+        body       TEXT NOT NULL DEFAULT '',
+        url        TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        read_at    TEXT
+      );
+      CREATE INDEX notifications_user ON notifications (user_id, id);
+
+      -- Journal des actions d'administration (la cible est gardée en texte : le compte peut être supprimé).
+      CREATE TABLE admin_log (
+        id         INTEGER PRIMARY KEY,
+        admin_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        action     TEXT NOT NULL,
+        target     TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  },
 ];
 
 function migrate(db) {
