@@ -1,0 +1,22 @@
+{
+  "name": "Auphine — Objectifs à deux",
+  "short_name": "Auphine",
+  "description": "Fixez-vous des objectifs l'un l'autre chaque jour, faites le bilan chaque semaine.",
+  "lang": "fr",
+  "start_url": "/#/today",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f5fb",
+  "theme_color": "#5b4bdb",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Mes objectifs du jour", "url": "/#/today" },
+    { "name": "Fixer un objectif à mon binôme", "url": "/#/partner" },
+    { "name": "Bilan de la semaine", "url": "/#/week" }
+  ]
+}

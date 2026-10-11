@@ -1,0 +1,6 @@
+# Caddy : HTTPS automatique (certificat Let's Encrypt) + relais vers Auphine.
+# À copier dans /etc/caddy/Caddyfile en remplaçant le domaine par le tien.
+auphine.mondomaine.fr {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3210
+}

@@ -1,0 +1,29 @@
+# Service systemd : démarre Auphine au boot et le relance s'il plante.
+# À copier dans /etc/systemd/system/auphine.service
+[Unit]
+Description=Auphine (objectifs à deux)
+After=network.target
+
+[Service]
+Type=simple
+User=auphine
+Group=auphine
+WorkingDirectory=/opt/auphine
+Environment=NODE_ENV=production
+Environment=PORT=3210
+# Écoute uniquement en local : seul Caddy est exposé sur Internet.
+Environment=HOST=127.0.0.1
+Environment=TRUST_PROXY=1
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/index.js
+Restart=always
+RestartSec=3
+
+# Durcissement : le service ne peut écrire que dans data/
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/auphine/data
+
+[Install]
+WantedBy=multi-user.target

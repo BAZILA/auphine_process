@@ -1,0 +1,16 @@
+{
+  "name": "auphine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Objectifs quotidiens fixés entre binômes, avec bilan hebdomadaire, compétences et niveaux.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning server/index.js",
+    "seed": "node --disable-warning=ExperimentalWarning scripts/seed.js",
+    "icons": "node scripts/gen-icons.js"
+  }
+}
