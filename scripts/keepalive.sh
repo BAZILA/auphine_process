@@ -22,10 +22,21 @@ fi
 
 running && exit 0
 
+if ! command -v "$NODE" >/dev/null 2>&1; then
+  echo "Node.js introuvable : $NODE (réinstalle-le avec nvm)" >&2
+  exit 1
+fi
+
 mkdir -p "$APP_DIR/data"
 cd "$APP_DIR" || exit 1
 # Moins de sous-processus : 2 pour les entrées/sorties, 1 pour V8 (au lieu d'une dizaine).
 HOST="${HOST:-127.0.0.1}" TRUST_PROXY="${TRUST_PROXY:-1}" UV_THREADPOOL_SIZE="${UV_THREADPOOL_SIZE:-2}" \
   nohup "$NODE" --v8-pool-size=1 --disable-warning=ExperimentalWarning server/index.js >> "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
-echo "Auphine lancée (pid $!), journal : $LOG_FILE"
+sleep 1
+if running; then
+  echo "Auphine lancée (pid $pid), journal : $LOG_FILE"
+else
+  echo "Échec du lancement d'Auphine, voir le journal : $LOG_FILE" >&2
+  exit 1
+fi
